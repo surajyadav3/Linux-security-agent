@@ -1,0 +1,9 @@
+Package: linux-security-agent
+Version: 1.0.0
+Section: admin
+Priority: optional
+Architecture: amd64
+Maintainer: Your Name <you@example.com>
+Description: Lightweight Linux security & inventory agent
+ Collects installed packages and performs CIS Benchmark security
+ checks, reporting results to an AWS-backed REST API and dashboard.

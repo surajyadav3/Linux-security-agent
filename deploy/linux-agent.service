@@ -1,0 +1,14 @@
+[Unit]
+Description=Linux Security Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/linux-agent -endpoint ${AGENT_API_ENDPOINT}
+EnvironmentFile=-/etc/linux-agent/config
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

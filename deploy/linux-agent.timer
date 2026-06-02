@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Linux Security Agent every 6 hours
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=6h
+Unit=linux-agent.service
+
+[Install]
+WantedBy=timers.target
