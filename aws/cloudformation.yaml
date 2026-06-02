@@ -1,0 +1,177 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Linux Security Agent backend (DynamoDB + Lambda + API Gateway)
+
+Resources:
+
+  # ── DynamoDB table ───────────────────────────────────────────────────────────
+  ReportsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: linux-agent-reports
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: agent_id
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: S
+      KeySchema:
+        - AttributeName: agent_id
+          KeyType: HASH
+        - AttributeName: timestamp
+          KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+  # ── IAM Role for Lambda ──────────────────────────────────────────────────────
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: linux-agent-lambda-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: lambda.amazonaws.com}
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: DynamoAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:GetItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource: !GetAtt ReportsTable.Arn
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "arn:aws:logs:*:*:*"
+
+  # ── Lambda: ingest ───────────────────────────────────────────────────────────
+  IngestFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: linux-agent-ingest
+      Runtime: python3.12
+      Handler: handler.lambda_handler
+      Role: !GetAtt LambdaRole.Arn
+      Timeout: 15
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref ReportsTable
+      Code:
+        ZipFile: |
+          # Placeholder — deploy real code via: aws lambda update-function-code
+          def lambda_handler(event, context):
+              return {"statusCode": 200, "body": "placeholder"}
+
+  # ── Lambda: query ────────────────────────────────────────────────────────────
+  QueryFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: linux-agent-query
+      Runtime: python3.12
+      Handler: handler.lambda_handler
+      Role: !GetAtt LambdaRole.Arn
+      Timeout: 15
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref ReportsTable
+      Code:
+        ZipFile: |
+          def lambda_handler(event, context):
+              return {"statusCode": 200, "body": "placeholder"}
+
+  # ── API Gateway ──────────────────────────────────────────────────────────────
+  Api:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: linux-agent-api
+      ProtocolType: HTTP
+      CorsConfiguration:
+        AllowOrigins: ["*"]
+        AllowMethods: ["GET", "POST", "OPTIONS"]
+        AllowHeaders: ["Content-Type"]
+
+  ApiStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref Api
+      StageName: prod
+      AutoDeploy: true
+
+  # Ingest route
+  IngestIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref Api
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${IngestFunction.Arn}/invocations
+      PayloadFormatVersion: "2.0"
+
+  IngestRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref Api
+      RouteKey: "POST /ingest"
+      Target: !Sub integrations/${IngestIntegration}
+
+  # Query routes
+  QueryIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref Api
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${QueryFunction.Arn}/invocations
+      PayloadFormatVersion: "2.0"
+
+  HostsRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref Api
+      RouteKey: "GET /hosts"
+      Target: !Sub integrations/${QueryIntegration}
+
+  AppsRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref Api
+      RouteKey: "GET /apps/{agent_id}"
+      Target: !Sub integrations/${QueryIntegration}
+
+  CisRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref Api
+      RouteKey: "GET /cis-results/{agent_id}"
+      Target: !Sub integrations/${QueryIntegration}
+
+  # Lambda permissions for API Gateway
+  IngestPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref IngestFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${Api}/*/*
+
+  QueryPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref QueryFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${Api}/*/*
+
+Outputs:
+  ApiEndpoint:
+    Description: "API Gateway endpoint — use this as AGENT_API_ENDPOINT"
+    Value: !Sub "https://${Api}.execute-api.${AWS::Region}.amazonaws.com/prod"
+  TableName:
+    Value: !Ref ReportsTable

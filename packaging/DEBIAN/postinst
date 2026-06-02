@@ -1,0 +1,6 @@
+#!/bin/bash
+set -e
+systemctl daemon-reload
+systemctl enable linux-agent.timer || true
+echo "linux-security-agent installed. Edit /etc/linux-agent/config and start with:"
+echo "  systemctl start linux-agent.timer"
